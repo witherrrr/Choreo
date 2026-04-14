@@ -27,6 +27,16 @@ mod ffi {
     }
 
     #[derive(Debug, Deserialize, Serialize, Clone)]
+    struct MotorConfig {
+        free_speed: f64,
+        stall_torque: f64,
+        kT: f64,
+        kV: f64,
+        supply_limit: f64,
+        stator_limit: f64,
+    }
+
+    #[derive(Debug, Deserialize, Serialize, Clone)]
     /// A swerve drivetrain physical model.
     struct SwerveDrivetrain {
         /// The mass of the robot (kg).
@@ -35,11 +45,8 @@ mod ffi {
         moi: f64,
         /// Radius of the wheels (m).
         wheel_radius: f64,
-        /// Maximum angular velocity of each wheel (rad/s).
-        wheel_max_angular_velocity: f64,
-        /// Maximum torque applied to each wheel (N−m).
-        wheel_max_torque: f64,
-        /// The Coefficient of Friction (CoF) of the wheels.
+
+        motor_config: MotorConfig,
         wheel_cof: f64,
         /// Translation of each swerve module from the origin of the robot
         /// coordinate system to the center of the module (m). There's
