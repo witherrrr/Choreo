@@ -22,3 +22,13 @@ dist/
 
 # mkdocs
 site/
+
+# cmake user presets
+CMakeUserPresets.json
+
+build/
+cli/
+test-tmp*/
+
+# Local PR-benchmark output (scripts/bench-local.sh)
+bench-local/
