@@ -214,6 +214,98 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
     }
   }
 
+  // friction = μmg
+  const double normal_force_per_wheel =
+      path.drivetrain.mass * 9.8 / num_wheels;
+  const double wheel_max_friction_force =
+      path.drivetrain.wheel_cof * normal_force_per_wheel;
+
+  // lambdize velocity constraints to apply at both ends
+  auto apply_module_velocity_constraints =
+      [&](size_t force_index, const Translation2v<double>& v_world,
+          const slp::Variable<double>& ω_val,
+          const Rotation2v<double>& θ_val) {
+        const auto kV = path.drivetrain.motor_config.kV;
+        const auto R = path.drivetrain.motor_config.resistance();
+        const auto I_supply_limit = path.drivetrain.motor_config.supply_limit;
+        const auto I_stator_limit = path.drivetrain.motor_config.stator_limit;
+        const auto kT_over_r =
+            path.drivetrain.motor_config.kT / path.drivetrain.wheel_radius;
+        const auto kV_over_r = kV / path.drivetrain.wheel_radius;
+        constexpr double v_supply = 12.0;
+
+        // TODO: pipe from UI
+        constexpr double kS = 0.40;
+        // assume rolling friction is equal to static friction for simplicity
+        // since rolling friction is not a common SysID term - conservative
+        // simplification to model increased V_motor due to kS
+        const double I_free = kS / R;
+
+        auto v_wrt_robot = v_world.rotate_by(-θ_val);
+        for (size_t module_index = 0;
+             module_index < path.drivetrain.modules.size(); ++module_index) {
+          const auto& translation = path.drivetrain.modules.at(module_index);
+
+          Translation2v<double> v_wheel_wrt_robot{
+              v_wrt_robot.x() - translation.y() * ω_val,
+              v_wrt_robot.y() + translation.x() * ω_val};
+          Translation2v<double> module_force{
+              Fx.at(force_index).at(module_index),
+              Fy.at(force_index).at(module_index)};
+
+          auto F_wrt_robot = module_force.rotate_by(-θ_val);
+
+          auto v_norm = slp::sqrt(v_wheel_wrt_robot.squared_norm() + 1e-6);
+          auto F_dot_v = F_wrt_robot.dot(v_wheel_wrt_robot);
+          auto F_norm_sq = F_wrt_robot.squared_norm();
+          auto F_longitudinal = F_dot_v / v_norm;
+          auto F_lateral = F_wrt_robot.dot(v_wheel_wrt_robot.rotate_by(
+                               Rotation2<double>{0.0, 1.0})) /
+                           v_norm;
+
+          // Penalize lateral forces with the Tire Induced Drag model
+          // F_drag = F_lateral * sin(α)
+          // where α is the slip angle between velocity and force
+          // Let sin(α) = α; then sin(α) = F_lateral / F_norm; thus
+          // F_drag = F_lateral * sin(α) = F_lateral * F_lateral / F_norm
+          //        = F_lateral * F_lateral * sqrt(F_norm_sq) / F_norm_sq
+          // constants used for numerical smoothing
+          auto F_drag = (F_lateral * F_lateral) *
+                        slp::sqrt(F_norm_sq + 1e-6) / (F_norm_sq + 1e-4);
+
+          // smooth free current around zero velocity for solver stability
+          auto friction_factor = v_norm / (v_norm + 1e-4);
+
+          // motor force is force in wheel direction + force to overcome drag
+          // from scrub + free current
+          auto I_motor = (F_longitudinal + F_drag) / kT_over_r +
+                         I_free * friction_factor;
+          auto V_emf = v_norm * kV_over_r;
+          auto V_motor = I_motor * R + V_emf;
+
+          // stator
+          // We need to constrain motor output brake force so that the solver
+          // doesn't abuse lateral drag force to generate extremely strong
+          // braking forces. Do this by constraining I_propulsive, the portion
+          // of current that generates longitudinal force, to be above
+          // -I_stator_limit.
+          // -I_stator_limit ≤ I_propulsive ≤ I_motor ≤ I_stator_limit
+          // I_propulsive = F_long/kT_over_r ≥ -I_stator_limit
+          //              = F_dot_v / (v_norm * kT_over_r) ≥ -I_stator_limit
+          //              = F_dot_v + I_stator_limit * kT_over_r * v_norm ≥ 0
+          problem.subject_to(F_dot_v + I_stator_limit * kT_over_r * v_norm >=
+                             0);
+          problem.subject_to(I_motor <= I_stator_limit);
+
+          // supply voltage
+          problem.subject_to(slp::bounds(-v_supply, V_motor, v_supply));
+
+          // supply current
+          auto P_elec = V_motor * I_motor;
+          problem.subject_to(P_elec <= I_supply_limit * v_supply);
+        }
+      };
+
   for (size_t index = 0; index < samp_tot; ++index) {
     Rotation2v<double> θ_k{cosθ.at(index), sinθ.at(index)};
     Translation2v<double> v_k{vx.at(index), vy.at(index)};
@@ -238,91 +330,19 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
     }
     auto τ_net = θ_k.cos() * τ_cos_sum - θ_k.sin() * τ_sin_sum;
 
-    // Apply module power constraints
-    auto v_wrt_robot = v_k.rotate_by(-θ_k);
+    // apply vel-dependent constraints at both interval endpoints
+    apply_module_velocity_constraints(index, v_k, ω.at(index), θ_k);
+    if (index + 1 < samp_tot) {
+      Rotation2v<double> θ_k_1{cosθ.at(index + 1), sinθ.at(index + 1)};
+      Translation2v<double> v_k_1{vx.at(index + 1), vy.at(index + 1)};
+      apply_module_velocity_constraints(index, v_k_1, ω.at(index + 1), θ_k_1);
+    }
+
+    // |F|₂² ≤ Fₘₐₓ² — total force must not slip
     for (size_t module_index = 0; module_index < path.drivetrain.modules.size();
          ++module_index) {
-      const auto& translation = path.drivetrain.modules.at(module_index);
-
-      Translation2v<double> v_wheel_wrt_robot{
-          v_wrt_robot.x() - translation.y() * ω.at(index),
-          v_wrt_robot.y() + translation.x() * ω.at(index)};
       Translation2v<double> module_force{Fx.at(index).at(module_index),
                                          Fy.at(index).at(module_index)};
-
-      const auto kV = path.drivetrain.motor_config.kV;
-      const auto R = path.drivetrain.motor_config.resistance();
-      const auto I_supply_limit = path.drivetrain.motor_config.supply_limit;
-      const auto I_stator_limit = path.drivetrain.motor_config.stator_limit;
-      const auto kT_over_r =
-          path.drivetrain.motor_config.kT / path.drivetrain.wheel_radius;
-      const auto kV_over_r = kV / path.drivetrain.wheel_radius;
-      constexpr double v_supply = 12.0;
-
-      // TODO: pipe from UI
-      constexpr double kS = 0.40;
-      // assume rolling friction is equal to static friction for simplicity
-      // since rolling friction is not a common SysID term - conservative
-      // simplification to model increased V_motor due to kS
-      const double I_free = kS / R;
-
-      auto F_wrt_robot = module_force.rotate_by(-θ_k);
-
-      // friction = μmg
-      const double normal_force_per_wheel =
-          path.drivetrain.mass * 9.8 / num_wheels;
-      const double wheel_max_friction_force =
-          path.drivetrain.wheel_cof * normal_force_per_wheel;
-
-      auto v_norm = slp::sqrt(v_wheel_wrt_robot.squared_norm() + 1e-6);
-      auto F_dot_v = F_wrt_robot.dot(v_wheel_wrt_robot);
-      auto F_norm_sq = F_wrt_robot.squared_norm();
-      auto F_longitudinal = F_dot_v / v_norm;
-      auto F_lateral = F_wrt_robot.dot(v_wheel_wrt_robot.rotate_by(
-                           Rotation2<double>{0.0, 1.0})) /
-                       v_norm;
-
-      // Penalize lateral forces with the Tire Induced Drag model
-      // F_drag = F_lateral * sin(α)
-      // where α is the slip angle between velocity and force
-      // Let sin(α) = α; then sin(α) = F_lateral / F_norm; thus
-      // F_drag = F_lateral * sin(α) = F_lateral * F_lateral / F_norm
-      //        = F_lateral * F_lateral * sqrt(F_norm_sq) / F_norm_sq
-      // constants used for numerical smoothing
-      auto F_drag = (F_lateral * F_lateral) * slp::sqrt(F_norm_sq + 1e-6) /
-                    (F_norm_sq + 1e-4);
-
-      // smooth free current around zero velocity for solver stability
-      auto friction_factor = v_norm / (v_norm + 1e-4);
-
-      // motor force is force in wheel direction + force to overcome drag from
-      // scrub + free current
-      auto I_motor =
-          (F_longitudinal + F_drag) / kT_over_r + I_free * friction_factor;
-      auto V_emf = v_norm * kV_over_r;
-      auto V_motor = I_motor * R + V_emf;
-
-      // stator
-      // We need to constrain motor output brake force so that the solver
-      // doesn't abuse lateral drag force to generate extremely strong braking
-      // forces. Do this by constraining I_propulsive, the portion of current
-      // that generates longitudinal force, to be above -I_stator_limit.
-      // -I_stator_limit ≤ I_propulsive ≤ I_motor ≤ I_stator_limit
-      // I_propulsive = F_long/kT_over_r ≥ -I_stator_limit
-      //              = F_dot_v / (v_norm * kT_over_r) ≥ -I_stator_limit
-      //              = F_dot_v + I_stator_limit * kT_over_r * v_norm ≥ 0
-      problem.subject_to(F_dot_v + I_stator_limit * kT_over_r * v_norm >= 0);
-      problem.subject_to(I_motor <= I_stator_limit);
-
-      // supply voltage
-      problem.subject_to(slp::bounds(-v_supply, V_motor, v_supply));
-
-      // supply current
-      auto P_elec = V_motor * I_motor;
-      problem.subject_to(P_elec <= I_supply_limit * v_supply);
-
-      // |F|₂² ≤ Fₘₐₓ²
-      // total force must not slip
       problem.subject_to(module_force.squared_norm() <=
                          wheel_max_friction_force * wheel_max_friction_force);
     }
