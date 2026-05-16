@@ -43,6 +43,10 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
 
   problem.add_callback(
       [this, handle = handle](const slp::IterationInfo<double>&) -> bool {
+        if (this->path.callbacks.empty()) {
+          return trajopt::get_cancellation_flag();
+        }
+
         constexpr int fps = 60;
         constexpr std::chrono::duration<double> time_per_frame{1.0 / fps};
 
