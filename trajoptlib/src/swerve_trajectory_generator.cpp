@@ -133,6 +133,23 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
           .norm();
   const double chassis_max_ω = chassis_max_v / wheel_max_position_radius;
   const double chassis_max_α = chassis_max_a / wheel_max_position_radius;
+
+  // Loose bounds on the kinematic decision variables. Try to keep the 
+  // solution closer to the feasible region with some linear constraints
+  constexpr double bound_margin = 2.0;
+  const double v_bound = bound_margin * chassis_max_v;
+  const double ω_bound = bound_margin * chassis_max_ω;
+  const double a_bound = bound_margin * chassis_max_a;
+  const double α_bound = bound_margin * chassis_max_α;
+  for (size_t index = 0; index < samp_tot; ++index) {
+    problem.subject_to(slp::bounds(-v_bound, vx.at(index), v_bound));
+    problem.subject_to(slp::bounds(-v_bound, vy.at(index), v_bound));
+    problem.subject_to(slp::bounds(-ω_bound, ω.at(index), ω_bound));
+    problem.subject_to(slp::bounds(-a_bound, ax.at(index), a_bound));
+    problem.subject_to(slp::bounds(-a_bound, ay.at(index), a_bound));
+    problem.subject_to(slp::bounds(-α_bound, α.at(index), α_bound));
+  }
+
   for (size_t sgmt_index = 0; sgmt_index < Ns.size(); ++sgmt_index) {
     size_t N_sgmt = Ns.at(sgmt_index);
     size_t sgmt_start = get_index(Ns, sgmt_index);
