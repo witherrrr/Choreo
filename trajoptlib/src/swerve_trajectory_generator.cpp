@@ -205,10 +205,11 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
       // θₖ₊₁ = θₖ + ωₖt + 1/2αₖt²
       // vₖ₊₁ = vₖ + aₖt
       // ωₖ₊₁ = ωₖ + αₖt
-      problem.subject_to(x_k_1 == x_k + v_k * dt_k + a_k * 0.5 * dt_k * dt_k);
+      auto half_dt_sq = 0.5 * dt_k * dt_k;
+      problem.subject_to(x_k_1 == x_k + v_k * dt_k + a_k * half_dt_sq);
       problem.subject_to(θ_k_1 ==
                          θ_k + Rotation2v<double>{ω_k * dt_k} +
-                             Rotation2v<double>{α_k * 0.5 * dt_k * dt_k});
+                             Rotation2v<double>{α_k * half_dt_sq});
       problem.subject_to(v_k_1 == v_k + a_k * dt_k);
       problem.subject_to(ω_k_1 == ω_k + α_k * dt_k);
     }
@@ -273,7 +274,8 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
       };
 
   auto apply_module_force_constraints =
-      [&](size_t force_index, const SampleVelocityKinematics& kin) {
+      [&](size_t force_index, const SampleVelocityKinematics& kin,
+          const std::vector<slp::Variable<double>>& F_norm_sq_by_module) {
         for (size_t module_index = 0;
              module_index < path.drivetrain.modules.size(); ++module_index) {
           const auto& mk = kin.modules.at(module_index);
@@ -284,7 +286,7 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
           auto F_wrt_robot = module_force.rotate_by(kin.neg_θ);
 
           auto F_dot_v = F_wrt_robot.dot(mk.v_wheel_wrt_robot);
-          auto F_norm_sq = module_force.squared_norm();
+          const auto& F_norm_sq = F_norm_sq_by_module.at(module_index);
           auto F_longitudinal = F_dot_v / mk.v_norm;
           auto F_lateral = F_wrt_robot.cross(mk.v_wheel_wrt_robot) / mk.v_norm;
 
@@ -342,10 +344,10 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
     Rotation2v<double> θ_k{cosθ.at(index), sinθ.at(index)};
 
     // Solve for net force
-    auto Fx_net = std::accumulate(Fx.at(index).begin(), Fx.at(index).end(),
-                                  slp::Variable{0.0});
-    auto Fy_net = std::accumulate(Fy.at(index).begin(), Fy.at(index).end(),
-                                  slp::Variable{0.0});
+    auto Fx_net = std::accumulate(Fx.at(index).begin() + 1,
+                                  Fx.at(index).end(), Fx.at(index).front());
+    auto Fy_net = std::accumulate(Fy.at(index).begin() + 1,
+                                  Fy.at(index).end(), Fy.at(index).front());
 
     // Solve for net torque.
     slp::Variable<double> τ_cos_sum = 0.0;
@@ -361,19 +363,29 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
     }
     auto τ_net = θ_k.cos() * τ_cos_sum - θ_k.sin() * τ_sin_sum;
 
+    // Fx²+Fy² per module is reused by both velocity-endpoint motor
+    // applications and the friction limit; build it once and share.
+    std::vector<slp::Variable<double>> F_norm_sq;
+    F_norm_sq.reserve(path.drivetrain.modules.size());
+    for (size_t module_index = 0; module_index < path.drivetrain.modules.size();
+         ++module_index) {
+      Translation2v<double> module_force{Fx.at(index).at(module_index),
+                                         Fy.at(index).at(module_index)};
+      F_norm_sq.push_back(module_force.squared_norm());
+    }
+
     // apply vel-dependent constraints at both interval endpoints, reusing the
     // shared per-sample velocity kinematics
-    apply_module_force_constraints(index, sample_kin.at(index));
+    apply_module_force_constraints(index, sample_kin.at(index), F_norm_sq);
     if (index + 1 < samp_tot) {
-      apply_module_force_constraints(index, sample_kin.at(index + 1));
+      apply_module_force_constraints(index, sample_kin.at(index + 1),
+                                     F_norm_sq);
     }
 
     // |F|₂² ≤ Fₘₐₓ² — total force must not slip
     for (size_t module_index = 0; module_index < path.drivetrain.modules.size();
          ++module_index) {
-      Translation2v<double> module_force{Fx.at(index).at(module_index),
-                                         Fy.at(index).at(module_index)};
-      problem.subject_to(module_force.squared_norm() <=
+      problem.subject_to(F_norm_sq.at(module_index) <=
                          wheel_max_friction_force * wheel_max_friction_force);
     }
 
