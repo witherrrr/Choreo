@@ -284,11 +284,9 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
           auto F_wrt_robot = module_force.rotate_by(kin.neg_θ);
 
           auto F_dot_v = F_wrt_robot.dot(mk.v_wheel_wrt_robot);
-          auto F_norm_sq = F_wrt_robot.squared_norm();
+          auto F_norm_sq = module_force.squared_norm();
           auto F_longitudinal = F_dot_v / mk.v_norm;
-          auto F_lateral = F_wrt_robot.dot(mk.v_wheel_wrt_robot.rotate_by(
-                               Rotation2<double>{0.0, 1.0})) /
-                           mk.v_norm;
+          auto F_lateral = F_wrt_robot.cross(mk.v_wheel_wrt_robot) / mk.v_norm;
 
           // Penalize lateral forces with the Tire Induced Drag model
           // F_drag = F_lateral * sin(α)
