@@ -106,9 +106,9 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
       Fx.at(index).emplace_back(problem.decision_variable());
       Fy.at(index).emplace_back(problem.decision_variable());
     }
-
-    dts.emplace_back(problem.decision_variable());
   }
+
+  dts.resize(samp_tot);
 
   double min_width = INFINITY;
   for (size_t i = 0; i < path.drivetrain.modules.size(); ++i) {
@@ -139,35 +139,40 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
     size_t sgmt_end = get_index(Ns, sgmt_index + 1);
 
     if (N_sgmt == 0) {
-      for (size_t index = sgmt_start; index < sgmt_end + 1; ++index) {
-        dts.at(index).set_value(0.0);
-      }
-    } else {
-      // Use initial_guess and Ns to find the dx, dy, dθ between wpts
-      const double dx =
-          initial_guess.x.at(sgmt_end) - initial_guess.x.at(sgmt_start);
-      const double dy =
-          initial_guess.y.at(sgmt_end) - initial_guess.y.at(sgmt_start);
-      const double dist = std::hypot(dx, dy);
-      const double θ_0 = std::atan2(initial_guess.thetasin.at(sgmt_start),
-                                    initial_guess.thetacos.at(sgmt_start));
-      const double θ_1 = std::atan2(initial_guess.thetasin.at(sgmt_end),
-                                    initial_guess.thetacos.at(sgmt_end));
-      const double dθ = std::abs(angle_modulus(θ_1 - θ_0));
+      continue;
+    }
 
-      const double angular_time =
-          calculate_exponential_time(dθ, chassis_max_ω, chassis_max_α);
-      const double linear_time = calculate_exponential_time(
-          dist, std::min(chassis_max_v, dist / angular_time), chassis_max_a);
-      const double sgmt_time = angular_time + linear_time;
+    // Use initial_guess and Ns to find the dx, dy, dθ between wpts
+    const double dx =
+        initial_guess.x.at(sgmt_end) - initial_guess.x.at(sgmt_start);
+    const double dy =
+        initial_guess.y.at(sgmt_end) - initial_guess.y.at(sgmt_start);
+    const double dist = std::hypot(dx, dy);
+    const double θ_0 = std::atan2(initial_guess.thetasin.at(sgmt_start),
+                                  initial_guess.thetacos.at(sgmt_start));
+    const double θ_1 = std::atan2(initial_guess.thetasin.at(sgmt_end),
+                                  initial_guess.thetacos.at(sgmt_end));
+    const double dθ = std::abs(angle_modulus(θ_1 - θ_0));
 
-      for (size_t index = sgmt_start; index < sgmt_end + 1; ++index) {
-        auto& dt = dts.at(index);
-        problem.subject_to(slp::bounds(0, dt, 3));
-        dt.set_value(sgmt_time / N_sgmt);
-      }
+    const double angular_time =
+        calculate_exponential_time(dθ, chassis_max_ω, chassis_max_α);
+    const double linear_time = calculate_exponential_time(
+        dist, std::min(chassis_max_v, dist / angular_time), chassis_max_a);
+    const double sgmt_time = angular_time + linear_time;
+
+    auto seg_dt = problem.decision_variable();
+    problem.subject_to(slp::bounds(0, seg_dt, 3));
+    seg_dt.set_value(sgmt_time / N_sgmt);
+    for (size_t index = sgmt_start; index < sgmt_end; ++index) {
+      dts.at(index) = seg_dt;
     }
   }
+
+  auto final_dt = problem.decision_variable();
+  problem.subject_to(slp::bounds(0, final_dt, 3));
+  final_dt.set_value(0.0);
+  dts.at(samp_tot - 1) = final_dt;
+
   problem.minimize(std::accumulate(dts.begin(), dts.end(), slp::Variable{0.0}));
 
   // Apply kinematics constraints
@@ -196,10 +201,6 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
       auto α_k_1 = α.at(index + 1);
 
       auto dt_k = dts.at(index);
-      if (sample_index < N_sgmt - 1) {
-        auto dt_k_1 = dts.at(index + 1);
-        problem.subject_to(dt_k_1 == dt_k);
-      }
 
       // xₖ₊₁ = xₖ + vₖt + 1/2aₖt²
       // θₖ₊₁ = θₖ + ωₖt + 1/2αₖt²
