@@ -136,7 +136,7 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
 
   // Loose bounds on the kinematic decision variables. Try to keep the 
   // solution closer to the feasible region with some linear constraints
-  constexpr double bound_margin = 2.0;
+  constexpr double bound_margin = 1.1;
   const double v_bound = bound_margin * chassis_max_v;
   const double ω_bound = bound_margin * chassis_max_ω;
   const double a_bound = bound_margin * chassis_max_a;
