@@ -133,6 +133,8 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
           .norm();
   const double chassis_max_ω = chassis_max_v / wheel_max_position_radius;
   const double chassis_max_α = chassis_max_a / wheel_max_position_radius;
+
+  slp::Variable<double> total_time = 0.0;
   for (size_t sgmt_index = 0; sgmt_index < Ns.size(); ++sgmt_index) {
     size_t N_sgmt = Ns.at(sgmt_index);
     size_t sgmt_start = get_index(Ns, sgmt_index);
@@ -163,6 +165,7 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
     auto seg_dt = problem.decision_variable();
     problem.subject_to(slp::bounds(0, seg_dt, 3));
     seg_dt.set_value(sgmt_time / N_sgmt);
+    total_time += seg_dt * static_cast<double>(N_sgmt);
     for (size_t index = sgmt_start; index < sgmt_end; ++index) {
       dts.at(index) = seg_dt;
     }
@@ -173,7 +176,7 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
   final_dt.set_value(0.0);
   dts.at(samp_tot - 1) = final_dt;
 
-  problem.minimize(std::accumulate(dts.begin(), dts.end(), slp::Variable{0.0}));
+  problem.minimize(total_time + final_dt);
 
   // Apply kinematics constraints
   for (size_t wpt_index = 0; wpt_index < wpt_cnt - 1; ++wpt_index) {
