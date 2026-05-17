@@ -276,18 +276,16 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
       auto F_dot_v = F_wrt_robot.dot(v_wheel_wrt_robot);
       auto F_norm_sq = F_wrt_robot.squared_norm();
       auto F_longitudinal = F_dot_v / v_norm;
-      auto F_lateral = F_wrt_robot.dot(v_wheel_wrt_robot.rotate_by(
-                           Rotation2<double>{0.0, 1.0})) /
-                       v_norm;
+      auto F_lateral_sq = F_norm_sq - F_longitudinal * F_longitudinal;
 
       // Penalize lateral forces with the Tire Induced Drag model
       // F_drag = F_lateral * sin(α)
       // where α is the slip angle between velocity and force
       // Let sin(α) = α; then sin(α) = F_lateral / F_norm; thus
-      // F_drag = F_lateral * sin(α) = F_lateral * F_lateral / F_norm
-      //        = F_lateral * F_lateral * sqrt(F_norm_sq) / F_norm_sq
+      // F_drag = F_lateral * sin(α) = F_lateral² / F_norm
+      //        = F_lateral² * sqrt(F_norm_sq) / F_norm_sq
       // constants used for numerical smoothing
-      auto F_drag = (F_lateral * F_lateral) * slp::sqrt(F_norm_sq + 1e-6) /
+      auto F_drag = F_lateral_sq * slp::sqrt(F_norm_sq + 1e-6) /
                     (F_norm_sq + 1e-4);
 
       // smooth free current around zero velocity for solver stability
