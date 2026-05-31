@@ -244,7 +244,7 @@ jobs:
             const publish = require(`${process.env.GITHUB_WORKSPACE}/scripts/ci/publish-renders.cjs`)
             await publish({ github, context, core })
 
-      - name: Build markdown report
+      - name: Build full markdown report
         env:
           ARTIFACT_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
@@ -257,7 +257,35 @@ jobs:
             ${RENDERS_URL:+--renders-url "$RENDERS_URL"} \
             --commit "${HEAD_SHA:0:7}" \
             --out report.md
-          cat report.md
+
+      - name: Publish full report to a ref
+        id: report
+        continue-on-error: true # a missing link must not block the comment
+        uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          REPORT_MD: report.md
+        with:
+          script: |
+            const publish = require(`${process.env.GITHUB_WORKSPACE}/scripts/ci/publish-report.cjs`)
+            await publish({ github, context, core })
+
+      - name: Build slim PR comment
+        env:
+          ARTIFACT_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          RENDERS_URL: ${{ steps.renders.outputs.url }}
+          REPORT_URL: ${{ steps.report.outputs.url }}
+        run: |
+          node scripts/bench-report.mjs \
+            --pr merged/tp-pr --base merged/tp-base \
+            --pr-reports merged/out-pr --base-reports merged/out-base \
+            --artifact-url "$ARTIFACT_URL" \
+            ${RENDERS_URL:+--renders-url "$RENDERS_URL"} \
+            ${REPORT_URL:+--report-url "$REPORT_URL"} \
+            --commit "${HEAD_SHA:0:7}" \
+            --out report.md --comment-out comment.md
+          cat comment.md
 
       - name: Upload consolidated bench artifact
         if: always()
@@ -276,4 +304,4 @@ jobs:
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.issue.number }}
-          body-path: report.md
+          body-path: comment.md

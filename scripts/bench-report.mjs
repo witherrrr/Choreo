@@ -106,7 +106,25 @@ for (const variant of variants) {
   }
 }
 
-writeFileSync(argv.out, renderMarkdown(rows, summary, artifactUrl, commit, rendersUrl));
+// URL of the full report.md when it's published somewhere browsable (the slim
+// comment links here for the per-trajectory detail it omits). Falls back to the
+// artifact link when unset.
+const reportUrl = argv["report-url"] ?? null;
+
+// The full report (every per-trajectory table) — uploaded as the workflow
+// artifact / published as a browsable blob.
+writeFileSync(argv.out, renderMarkdown(rows, summary,
+  { artifactUrl, commit, rendersUrl, reportUrl, slim: false }));
+
+// The slim PR comment — same summary + cross-dt tables + per-variant verdicts,
+// but NO per-trajectory tables, so it stays well under GitHub's 65,536-char
+// comment limit no matter how large the corpus grows (736 trajectories would
+// otherwise produce a ~260K-char body the API rejects). Only written when
+// asked; local runs that just want the full report omit --comment-out.
+if (argv["comment-out"]) {
+  writeFileSync(argv["comment-out"], renderMarkdown(rows, summary,
+    { artifactUrl, commit, rendersUrl, reportUrl, slim: true }));
+}
 
 // ---------- aggregation ----------
 
@@ -173,7 +191,8 @@ function trajMetrics(trajPath) {
 
 // ---------- rendering ----------
 
-function renderMarkdown(rows, summary, artifactUrl, commit, rendersUrl) {
+function renderMarkdown(rows, summary, opts) {
+  const { artifactUrl, commit, rendersUrl, reportUrl, slim } = opts;
   const L = [];
   L.push(commit
     ? `### Choreo trajectory benchmark — commit \`${commit}\``
@@ -221,12 +240,17 @@ function renderMarkdown(rows, summary, artifactUrl, commit, rendersUrl) {
 
   for (const [variant, rs] of byVariant) {
     if (rs.length === 1 && rs[0].noReport) {
-      L.push(`<details><summary><b>${variant}</b> — ⚠ no PR report</summary>`);
-      L.push("");
-      L.push(`The PR CLI produced no report for this variant (it crashed or was killed before writing one).`);
-      L.push("");
-      L.push(`</details>`);
-      L.push("");
+      if (slim) {
+        L.push(`- **${variant}** — ⚠ no PR report`);
+        L.push("");
+      } else {
+        L.push(`<details><summary><b>${variant}</b> — ⚠ no PR report</summary>`);
+        L.push("");
+        L.push(`The PR CLI produced no report for this variant (it crashed or was killed before writing one).`);
+        L.push("");
+        L.push(`</details>`);
+        L.push("");
+      }
       continue;
     }
 
@@ -246,6 +270,13 @@ function renderMarkdown(rows, summary, artifactUrl, commit, rendersUrl) {
     } else {
       verdict = counts;
     }
+
+    if (slim) {
+      L.push(`- **${variant}** — ${verdict}`);
+      L.push("");
+      continue;
+    }
+
     const open = variant === worstVariant ? " open" : "";
     L.push(`<details${open}><summary><b>${variant}</b> — ${verdict}</summary>`);
     L.push("");
@@ -282,6 +313,16 @@ function renderMarkdown(rows, summary, artifactUrl, commit, rendersUrl) {
 
     L.push(`</details>`);
     L.push("");
+  }
+
+  if (slim) {
+    if (reportUrl) {
+      L.push(`Per-trajectory detail (all ${summary.total} trajectories) → [full report](${reportUrl})`);
+      L.push("");
+    } else if (artifactUrl) {
+      L.push(`Per-trajectory detail (all ${summary.total} trajectories) → \`report.md\` in the [workflow artifact](${artifactUrl})`);
+      L.push("");
+    }
   }
 
   if (artifactUrl) {
@@ -383,8 +424,8 @@ function dtSummaryTables(rows) {
   const tiersSeen = new Set();
   const families = new Set();
   const trajNames = new Set();
-  const byFamilyTier = new Map(); // `${family} ${tier}` -> rows[]
-  const byCell = new Map();       // `${family} ${traj} ${tier}` -> row
+  const byFamilyTier = new Map(); // `${family} ${tier}` -> rows[]
+  const byCell = new Map();       // `${family} ${traj} ${tier}` -> row
 
   for (const r of rows) {
     const d = parseDt(r.variant);
@@ -393,10 +434,10 @@ function dtSummaryTables(rows) {
     tiersSeen.add(d.tier);
     if (r.noReport) continue; // counts toward family/tier, but has no rows
     trajNames.add(r.name);
-    const ft = `${d.family} ${d.tier}`;
+    const ft = `${d.family} ${d.tier}`;
     if (!byFamilyTier.has(ft)) byFamilyTier.set(ft, []);
     byFamilyTier.get(ft).push(r);
-    byCell.set(`${d.family} ${r.name} ${d.tier}`, r);
+    byCell.set(`${d.family} ${r.name} ${d.tier}`, r);
   }
 
   if (tiersSeen.size === 0) return [];
@@ -418,7 +459,7 @@ function dtSummaryTables(rows) {
   let anyPartial = false;
   for (const fam of fams) {
     const cells = tiers.map(t => {
-      const rs = byFamilyTier.get(`${fam} ${t}`);
+      const rs = byFamilyTier.get(`${fam} ${t}`);
       if (!rs || rs.length === 0) return "—";
       const ok = rs.filter(r => r.prOk && r.pr && Number.isFinite(r.pr.mean));
       if (ok.length === 0) return "—";
@@ -435,6 +476,34 @@ function dtSummaryTables(rows) {
   }
   L.push("");
 
+  // Table 1b — same grid as Table 1 but PR-vs-base Δ% of the family total, so a
+  // cell is meaningful on its own (the raw totals only matter relative to base).
+  // Summed over the cell's comparable trajectories (ok on BOTH sides), matching
+  // the overall summary's and the per-variant verdict's methodology.
+  L.push(`PR-vs-base Δ% of that family total per dt tier (negative = PR faster). Bold = |Δ| > ${SOLVE_PCT_THRESHOLD}%.`);
+  L.push("");
+  L.push(`| Family | ${tiers.join(" | ")} |`);
+  L.push(`|---|${alignNum}|`);
+  for (const fam of fams) {
+    const cells = tiers.map(t => {
+      // Same `${fam} ${tier}` key the population above and Table 1 use.
+      const rs = byFamilyTier.get(`${fam} ${t}`);
+      if (!rs || rs.length === 0) return "—";
+      const cmp = rs.filter(r => r.prOk && r.baseOk &&
+        Number.isFinite(r.pr?.mean) && Number.isFinite(r.base?.mean));
+      if (cmp.length === 0) return "—";
+      const sp = cmp.reduce((a, r) => a + r.pr.mean, 0);
+      const sb = cmp.reduce((a, r) => a + r.base.mean, 0);
+      if (sb <= 0) return "~";
+      const pct = ((sp - sb) / sb) * 100;
+      const partial = cmp.length < trajs.length;
+      const txt = `${signedPct(pct)}${partial ? ` \\*${cmp.length}/${trajs.length}` : ""}`;
+      return Math.abs(pct) > SOLVE_PCT_THRESHOLD ? `**${txt}**` : txt;
+    });
+    L.push(`| \`${fam}\` | ${cells.join(" | ")} |`);
+  }
+  L.push("");
+
   // Table 2 — regression across dt: PR-vs-base Δ% per family × trajectory.
   L.push(`PR-vs-base solve Δ% per trajectory across dt tiers (is a regression consistent, or dt-dependent?). Bold = |Δ| > ${SOLVE_PCT_THRESHOLD}%.`);
   L.push("");
@@ -443,7 +512,7 @@ function dtSummaryTables(rows) {
   for (const fam of fams) {
     for (const tj of trajs) {
       const cells = tiers.map(t => {
-        const r = byCell.get(`${fam} ${tj} ${t}`);
+        const r = byCell.get(`${fam} ${tj} ${t}`);
         if (!r) return "—";
         if (!r.prOk) return "PR✗";
         if (!r.baseOk) return "base✗";
