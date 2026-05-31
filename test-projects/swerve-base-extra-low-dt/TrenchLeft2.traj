@@ -814,7 +814,15 @@
     "side": 0.47625,
     "back": 0.4064
    },
-   "differentialTrackWidth": 0.5588
+   "differentialTrackWidth": 0.5588,
+   "motorConfig": {
+    "free_speed": 605.6990636121121,
+    "stall_torque": 9.36,
+    "kT": 0.0197,
+    "kV": 0.019664866458548407,
+    "supply_limit": 60.0,
+    "stator_limit": 120.0
+   }
   },
   "sampleType": "Swerve",
   "waypoints": [

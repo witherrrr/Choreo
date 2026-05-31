@@ -272,8 +272,6 @@ function renderMarkdown(rows, summary, opts) {
     }
 
     if (slim) {
-      L.push(`- **${variant}** — ${verdict}`);
-      L.push("");
       continue;
     }
 

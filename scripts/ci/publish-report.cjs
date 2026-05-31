@@ -16,16 +16,13 @@ module.exports = async ({ github, context, core }) => {
     return;
   }
 
-  const blob = await github.rest.git.createBlob({
-    owner,
-    repo,
-    content: fs.readFileSync(reportPath).toString("base64"),
-    encoding: "base64",
-  });
+  // Inline content (no separate createBlob) — one createTree for the single
+  // report.md file. Keeps this publish to ~3 mutating requests so it never
+  // contributes to a secondary-rate-limit burst.
   const tree = await github.rest.git.createTree({
     owner,
     repo,
-    tree: [{ path: "report.md", mode: "100644", type: "blob", sha: blob.data.sha }],
+    tree: [{ path: "report.md", mode: "100644", type: "blob", content: fs.readFileSync(reportPath, "utf8") }],
   });
   const c = await github.rest.git.createCommit({
     owner,
