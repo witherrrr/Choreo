@@ -53,7 +53,7 @@ endif()
 FetchContent_Declare(
     Sleipnir
     GIT_REPOSITORY https://github.com/witherrrr/Sleipnir
-    GIT_TAG dfcadc0525f582509aea414abb0cb3c793db244d
+    GIT_TAG 794b8fc1566976a15f883a53dee59faa343dceeb
     SYSTEM
 )
 FetchContent_MakeAvailable(Sleipnir)
