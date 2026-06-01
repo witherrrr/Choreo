@@ -240,10 +240,7 @@ function renderMarkdown(rows, summary, opts) {
 
   for (const [variant, rs] of byVariant) {
     if (rs.length === 1 && rs[0].noReport) {
-      if (slim) {
-        L.push(`- **${variant}** — ⚠ no PR report`);
-        L.push("");
-      } else {
+      if (!slim) {
         L.push(`<details><summary><b>${variant}</b> — ⚠ no PR report</summary>`);
         L.push("");
         L.push(`The PR CLI produced no report for this variant (it crashed or was killed before writing one).`);
