@@ -170,6 +170,12 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
   }
   problem.minimize(std::accumulate(dts.begin(), dts.end(), slp::Variable{0.0}));
 
+  for (size_t index = 0; index < samp_tot; ++index) {
+    problem.subject_to(cosθ.at(index) * cosθ.at(index) +
+                           sinθ.at(index) * sinθ.at(index) ==
+                       1.0);
+  }
+
   // Apply kinematics constraints
   for (size_t wpt_index = 0; wpt_index < wpt_cnt - 1; ++wpt_index) {
     size_t N_sgmt = Ns.at(wpt_index);
@@ -206,9 +212,11 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
       // vₖ₊₁ = vₖ + aₖt
       // ωₖ₊₁ = ωₖ + αₖt
       problem.subject_to(x_k_1 == x_k + v_k * dt_k + a_k * 0.5 * dt_k * dt_k);
-      problem.subject_to(θ_k_1 ==
-                         θ_k + Rotation2v<double>{ω_k * dt_k} +
-                             Rotation2v<double>{α_k * 0.5 * dt_k * dt_k});
+      auto θ_target = θ_k + Rotation2v<double>{ω_k * dt_k} +
+                      Rotation2v<double>{α_k * 0.5 * dt_k * dt_k};
+      problem.subject_to(θ_k_1.cos() * θ_target.sin() -
+                             θ_k_1.sin() * θ_target.cos() ==
+                         0.0);
       problem.subject_to(v_k_1 == v_k + a_k * dt_k);
       problem.subject_to(ω_k_1 == ω_k + α_k * dt_k);
     }
