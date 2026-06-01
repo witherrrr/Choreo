@@ -216,7 +216,6 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
 
   for (size_t index = 0; index < samp_tot; ++index) {
     Rotation2v<double> θ_k{cosθ.at(index), sinθ.at(index)};
-    Translation2v<double> v_k{vx.at(index), vy.at(index)};
 
     // Solve for net force
     auto Fx_net = std::accumulate(Fx.at(index).begin(), Fx.at(index).end(),
@@ -238,15 +237,26 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
     }
     auto τ_net = θ_k.cos() * τ_cos_sum - θ_k.sin() * τ_sin_sum;
 
+    // Evaluate per-module physics at the interval midpoint so the slip-angle
+    // model error is O(dt²) instead of O(dt); otherwise the optimizer can use
+    // a long dt to hide lateral force that the start-of-interval slip check
+    // doesn't see.
+    auto dt_k = dts.at(index);
+    Translation2v<double> v_mid{vx.at(index) + 0.5 * ax.at(index) * dt_k,
+                                vy.at(index) + 0.5 * ay.at(index) * dt_k};
+    auto ω_mid = ω.at(index) + 0.5 * α.at(index) * dt_k;
+    auto θ_mid =
+        θ_k.rotate_by(Rotation2v<double>{0.5 * ω.at(index) * dt_k});
+
     // Apply module power constraints
-    auto v_wrt_robot = v_k.rotate_by(-θ_k);
+    auto v_wrt_robot = v_mid.rotate_by(-θ_mid);
     for (size_t module_index = 0; module_index < path.drivetrain.modules.size();
          ++module_index) {
       const auto& translation = path.drivetrain.modules.at(module_index);
 
       Translation2v<double> v_wheel_wrt_robot{
-          v_wrt_robot.x() - translation.y() * ω.at(index),
-          v_wrt_robot.y() + translation.x() * ω.at(index)};
+          v_wrt_robot.x() - translation.y() * ω_mid,
+          v_wrt_robot.y() + translation.x() * ω_mid};
       Translation2v<double> module_force{Fx.at(index).at(module_index),
                                          Fy.at(index).at(module_index)};
 
@@ -266,7 +276,7 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
       // simplification to model increased V_motor due to kS
       const double I_free = kS / R;
 
-      auto F_wrt_robot = module_force.rotate_by(-θ_k);
+      auto F_wrt_robot = module_force.rotate_by(-θ_mid);
 
       // friction = μmg
       const double normal_force_per_wheel =
