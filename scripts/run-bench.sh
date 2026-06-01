@@ -28,6 +28,9 @@ OUT=${3:?missing output dir}
 ONLY_VARIANT=${4:-}
 RUNS=${5:-5}
 TRAJ_JOBS=${BENCH_TRAJ_JOBS:-4}   # GHA runners are 4-core
+TRAJ_TIMEOUT_S=${BENCH_TRAJ_TIMEOUT:-300}
+TRAJ_KILL_GRACE_S=${BENCH_TRAJ_KILL_GRACE:-10}
+
 mkdir -p "$OUT"
 
 # Per-trajectory shards live outside $OUT so they neither bloat the uploaded
@@ -92,6 +95,42 @@ merge_shards() {
   ' "$out_file" "$shard_dir"
 }
 
+# Run one trajectory's CLI invocation, optionally under a wall-clock timeout,
+# capturing its CPU time to <traj>.cpu. The CLI writes its report shard itself;
+# we only step in when `timeout` kills a stalled solve. Because the killed
+# process never wrote a shard, that trajectory would otherwise silently vanish
+# from the report (merge_shards/bench-report only know trajectories that
+# produced a shard), so we synthesize a minimal ok:false shard. We keep it
+# deliberately thin — `name` + `ok:false` + `error`, no `solve_ms` — both to
+# minimize how much of the CLI's report schema this script duplicates and
+# because bench-report drops failed entries from the solve-time stats anyway.
+# `timeout` exits 124 when it killed the command on the deadline, 137 when the
+# SIGKILL backstop was needed after the grace period.
+bench_one() {
+  local name=$1 tn=$2 run=$3 rs=$4
+  local report="$rs/$tn.report.json" cpu="$rs/$tn.cpu"
+  local -a cmd=("$CLI" --chor "$chor" --trajectory "$tn" --generate --report-json "$report")
+  if [ "$TRAJ_TIMEOUT_S" -gt 0 ]; then
+    cmd=(timeout -k "${TRAJ_KILL_GRACE_S}s" "${TRAJ_TIMEOUT_S}s" "${cmd[@]}")
+  fi
+  local rc=0
+  # fd3 = this shell's stderr (CLI logs flow there as before); the brace
+  # group's own stderr — where the `time` keyword writes "%U %S" — goes to
+  # <traj>.cpu, isolating the timing from choreo-cli's ~MBs of solver output.
+  { time "${cmd[@]}" 2>&3 ; } 3>&2 2>"$cpu" || rc=$?
+  case "$rc" in
+    0) ;;
+    124|137)
+      printf '[{"name":"%s","ok":false,"error":"timed out after %ss"}]\n' \
+        "$tn" "$TRAJ_TIMEOUT_S" > "$report"
+      echo "choreo-cli TIMED OUT after ${TRAJ_TIMEOUT_S}s on $name/$tn run $run/$RUNS" >&2
+      ;;
+    *)
+      echo "choreo-cli exited nonzero ($rc) on $name/$tn run $run/$RUNS" >&2
+      ;;
+  esac
+}
+
 for proj_dir in "${project_dirs[@]}"; do
   name=$(basename "$proj_dir")
   chor="$proj_dir/project.chor"
@@ -122,16 +161,7 @@ for proj_dir in "${project_dirs[@]}"; do
       if [ "$TRAJ_JOBS" -gt 0 ]; then
         while [ "$(jobs -rp | wc -l)" -ge "$TRAJ_JOBS" ]; do wait -n || true; done
       fi
-      {
-        # fd3 = this shell's stderr (CLI logs flow there as before); the brace
-        # group's own stderr — where the `time` keyword writes "%U %S" — goes
-        # to <traj>.cpu, so the timing is isolated from choreo-cli's ~MBs of
-        # solver/tracing output instead of buried in it.
-        { time "$CLI" --chor "$chor" --trajectory "$tn" --generate \
-            --report-json "$rs/$tn.report.json" 2>&3 ; } \
-          3>&2 2>"$rs/$tn.cpu" \
-          || echo "choreo-cli exited nonzero on $name/$tn run $run/$RUNS" >&2
-      } &
+      bench_one "$name" "$tn" "$run" "$rs" &
     done
   done
   wait
