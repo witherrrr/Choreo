@@ -42,6 +42,7 @@ export interface MotorConfig<T extends ExprOrNumber> {
     stall_torque: T;
     kT: T;
     kV: T;
+    kS: T;
     supply_limit: T;
     stator_limit: T;
 }

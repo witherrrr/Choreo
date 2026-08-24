@@ -259,8 +259,7 @@ SwerveTrajectoryGenerator::SwerveTrajectoryGenerator(
       const auto kV_over_r = kV / path.drivetrain.wheel_radius;
       constexpr double v_supply = 12.0;
 
-      // TODO: pipe from UI
-      constexpr double kS = 0.40;
+      const auto kS = path.drivetrain.motor_config.kS;
       // assume rolling friction is equal to static friction for simplicity
       // since rolling friction is not a common SysID term - conservative
       // simplification to model increased V_motor due to kS

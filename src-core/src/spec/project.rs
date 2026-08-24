@@ -49,6 +49,7 @@ pub struct MotorConfig<T: SnapshottableType> {
     pub stall_torque: T,
     pub kT: T,
     pub kV: T,
+    pub kS: T,
     pub supply_limit: T,
     pub stator_limit: T,
 }
@@ -60,6 +61,7 @@ impl<T: SnapshottableType> MotorConfig<T> {
             stall_torque: self.stall_torque.snapshot(),
             kT: self.kT.snapshot(),
             kV: self.kV.snapshot(),
+            kS: self.kS.snapshot(),
             supply_limit: self.supply_limit.snapshot(),
             stator_limit: self.stator_limit.snapshot(),
         }
@@ -251,6 +253,7 @@ impl Default for ProjectFile {
                     stall_torque: Expr::new("9.36 N * m", 9.36),
                     kT: Expr::new("0.0197 N * m/A", 0.0197),
                     kV: Expr::new("0.00206896552 V/rpm", 0.00206896552 * 60.0 / (2.0 * PI)),
+                    kS: Expr::new("0.4 V", 0.4),
                     supply_limit: Expr::new("60 A", 60.0),
                     stator_limit: Expr::new("120 A", 120.0),
                 },

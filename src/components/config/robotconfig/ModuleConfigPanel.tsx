@@ -92,6 +92,15 @@ class RobotConfigPanel extends Component<Props, State> {
         />
 
         <ExpressionInput
+          title="kS"
+          enabled={true}
+          roundingPrecision={3}
+          number={config.motorConfig.kS}
+          maxWidthCharacters={8}
+          titleTooltip="Voltage required to overcome static friction, from SysID."
+        />
+
+        <ExpressionInput
           title="Supply Limit"
           enabled={true}
           roundingPrecision={0}

@@ -32,6 +32,7 @@ mod ffi {
         stall_torque: f64,
         kT: f64,
         kV: f64,
+        kS: f64,
         supply_limit: f64,
         stator_limit: f64,
     }

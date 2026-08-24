@@ -8,6 +8,7 @@ struct MotorConfig {
   double stall_torque;
   double kT;
   double kV;
+  double kS;
   double supply_limit;
   double stator_limit;
 

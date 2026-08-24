@@ -170,6 +170,7 @@ function getConstructors(vars: () => IVariables): EnvConstructors {
           stall_torque: vars().createExpression(config.motorConfig.stall_torque, "Torque"),
           kT: vars().createExpression(config.motorConfig.kT, "TorquePerCurrent"),
           kV: vars().createExpression(config.motorConfig.kV, "VoltagePerAngVel"),
+          kS: vars().createExpression(config.motorConfig.kS, "Voltage"),
           supply_limit: vars().createExpression(config.motorConfig.supply_limit, "Current"),
           stator_limit: vars().createExpression(config.motorConfig.stator_limit, "Current"),
         },

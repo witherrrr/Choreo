@@ -4,7 +4,13 @@ import {
   MotorCurves
 } from "../components/config/robotconfig/MotorCurves";
 import { InToM, LbsToKg, MToIn } from "../util/UnitConversions";
-import { Bumper, Expr, Module, RobotConfig } from "./schema/DocumentTypes";
+import {
+  Bumper,
+  Expr,
+  Module,
+  MotorConfig,
+  RobotConfig
+} from "./schema/DocumentTypes";
 import { ExpressionStore } from "./ExpressionStore";
 
 const DEFAULT_FRAME_SIZE = InToM(28);
@@ -49,6 +55,7 @@ export const EXPR_DEFAULTS: RobotConfig<Expr> = {
     free_speed: { exp: "5800 RPM", val: (5800.0 / 60.0) * 2 * Math.PI },
     kT: { exp: "0.0197 N * m / A", val: 0.0197 },
     kV: { exp: "0.00206896552 V / RPM", val: 0.00206896552 * 60 / (2 * Math.PI) },
+    kS: { exp: "0.4 V", val: 0.4 },
     supply_limit: { exp: "60 A", val: 60.0 },
     stator_limit: { exp: "120 A", val: 120.0 }
   },
@@ -102,6 +109,7 @@ export const MotorConfigStore = types
     stall_torque: ExpressionStore,
     kT: ExpressionStore,
     kV: ExpressionStore,
+    kS: ExpressionStore,
     supply_limit: ExpressionStore,
     stator_limit: ExpressionStore,
   })
@@ -112,6 +120,7 @@ export const MotorConfigStore = types
         stall_torque: self.stall_torque.serialize,
         kT: self.kT.serialize,
         kV: self.kV.serialize,
+        kS: self.kS.serialize,
         supply_limit: self.supply_limit.serialize,
         stator_limit: self.stator_limit.serialize
       };
@@ -122,6 +131,7 @@ export const MotorConfigStore = types
         stall_torque: self.stall_torque.value,
         kT: self.kT.value,
         kV: self.kV.value,
+        kS: self.kS.value,
         supply_limit: self.supply_limit.value,
         stator_limit: self.stator_limit.value
       };
@@ -133,6 +143,7 @@ export const MotorConfigStore = types
       self.stall_torque.deserialize(ser.stall_torque);
       self.kT.deserialize(ser.kT);
       self.kV.deserialize(ser.kV);
+      self.kS.deserialize(ser.kS);
       self.supply_limit.deserialize(ser.supply_limit);
       self.stator_limit.deserialize(ser.stator_limit);
     }

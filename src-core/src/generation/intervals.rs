@@ -46,7 +46,8 @@ pub fn guess_control_interval_count(
             let distance = dx.hypot(dy);
             let mut dtheta = angle_modulus(next.heading - this.heading).abs();
             let motor_config = config.motor_config.snapshot();
-            let max_force = motor_config.kT * motor_config.stator_limit * config.gearing / config.radius;
+            let max_force =
+                motor_config.kT * motor_config.stator_limit * config.gearing / config.radius;
 
             // Default to robotConfig's max velocity and acceleration
             let mut max_linear_vel = motor_config.free_speed * config.radius / config.gearing;

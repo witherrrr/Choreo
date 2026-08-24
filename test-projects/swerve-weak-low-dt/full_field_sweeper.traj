@@ -60,6 +60,7 @@
     "stall_torque":9.36,
     "kT":0.02,
     "kV":0.01975716537568162,
+    "kS":0.4,
     "supply_limit":60.0,
     "stator_limit":120.0
    }

@@ -36,6 +36,7 @@ void SwerveTrajectoryGenerator::set_drivetrain(
                                  drivetrain.motor_config.stall_torque,
                                  drivetrain.motor_config.kT,
                                  drivetrain.motor_config.kV,
+                                 drivetrain.motor_config.kS,
                                  drivetrain.motor_config.supply_limit,
                                  drivetrain.motor_config.stator_limit};
   path_builder.set_drivetrain(trajopt::SwerveDrivetrain{
