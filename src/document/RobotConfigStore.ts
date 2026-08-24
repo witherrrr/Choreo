@@ -13,6 +13,9 @@ import {
 } from "./schema/DocumentTypes";
 import { ExpressionStore } from "./ExpressionStore";
 
+// Nominal battery voltage assumed by the solver (v_supply in trajoptlib)
+const SUPPLY_VOLTAGE = 12;
+
 const DEFAULT_FRAME_SIZE = InToM(28);
 const DEFAULT_BUMPER = DEFAULT_FRAME_SIZE + 2 * InToM(2.5 + 0.75); // 28x28 bot with 2.5" noodle and 0.75" backing
 const DEFAULT_WHEELBASE = DEFAULT_FRAME_SIZE - 2 * InToM(2.625); //SDS Mk4i contact patch is 2.625 in from frame edge
@@ -202,10 +205,15 @@ export const RobotConfigStore = types
   .views((self) => {
     return {
       get wheelMaxVelocity() {
-        return self.vmax.value / self.gearing.value;
+        const motor = self.motorConfig;
+        return (
+          (SUPPLY_VOLTAGE - motor.kS.value) /
+          (motor.kV.value * self.gearing.value)
+        );
       },
       get wheelMaxTorque() {
-        return self.tmax.value * self.gearing.value;
+        const motor = self.motorConfig;
+        return motor.kT.value * self.gearing.value * motor.stator_limit.value;
       },
       get serialize(): RobotConfig<Expr> {
         return {
